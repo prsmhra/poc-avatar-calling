@@ -1,0 +1,135 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+# Flutter/Dart
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+coverage/
+flutter_*.png
+flutter_export_environment.sh
+generated_plugin_registrant.dart
+ 
+# IntelliJ / Android Studio
+.idea/
+*.iml
+ 
+# VS Code
+.vscode/
+.history/
+ 
+# Android
+android/.gradle/
+android/captures/
+android/gradlew
+android/gradlew.bat
+android/local.properties
+android/key.properties
+android/app/google-services.json
+android/app/upload-keystore.jks
+android/.gradle/
+android/build/
+android/app/build/
+ 
+# iOS
+ios/Flutter/.last_build_id
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Generated.xcconfig
+ios/Flutter/flutter_export_environment.sh
+ios/Runner.xcworkspace/
+ios/Runner/GeneratedPluginRegistrant.*
+ios/build/
+ios/.generated/
+ios/*.xcuserdatad
+ios/*.xcworkspace
+ 
+# macOS
+macos/Flutter/GeneratedPluginRegistrant.swift
+macos/Flutter/ephemeral/
+macos/Pods/
+macos/build/
+ 
+# Windows
+windows/flutter/
+windows/runner/GeneratedPluginRegistrant.*
+windows/build/
+ 
+# Linux
+linux/flutter/
+linux/runner/GeneratedPluginRegistrant.*
+linux/build/
+ 
+# Web
+web/.dart_tool/
+web/build/
+ 
+# Firebase / Google Config Files
+google-services.json
+GoogleService-Info.plist
+ 
+# Miscellaneous
+*.log
+*.tmp
+*.swp
+*.lock
+*.DS_Store
+*.bak
+*.orig
+*.rej
+ 
+# Coverage reports
+coverage/
+*.lcov
+ 
+# Symbolication / Crashlytics
+app.*.symbols
+*.dSYM.zip
+*.dSYM
+ 
+# Other generated files
+pubspec.lock

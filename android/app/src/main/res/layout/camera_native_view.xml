@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/camera_root"
+    android:orientation="vertical"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <!-- Camera preview takes the available space (when this native view is
+         placed inside a half-screen AndroidView, preview will fill that area) -->
+    <!-- Hide the native camera preview by default so the camera continues
+         to run headless (background) and only the avatar WebView is shown
+         inside the AndroidView. If you later want an on-screen preview,
+         the platform view exposes a method to toggle visibility. -->
+    <androidx.camera.view.PreviewView
+        android:id="@+id/previewView"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:visibility="gone"
+        android:layout_weight="0" />
+
+    <!-- Avatar WebView occupies the full platform view area -->
+    <WebView
+        android:id="@+id/avatarWebView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+</LinearLayout>
