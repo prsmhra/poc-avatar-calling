@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>3D Avatar Viewer</title>
+    <style>
+        body {
+          margin: 0;
+          overflow: hidden;
+          background-color: black;
+        }
+        #loading {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          color: white;
+          font-family: Arial, sans-serif;
+          background-color: rgba(0, 0, 0, 0.6);
+          padding: 10px 20px;
+          border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+<div id="loading">Loading model...</div>
+
+<script src="./three.min.js"></script>
+<script src="./GLTFLoader.js"></script>
+
+<script>
+    /****************************
+     *  Initialize Scene
+     ****************************/
+    let scene, camera, renderer, loader, model;
+    init();
+
+    function init() {
+      console.log("✅ Debug logger initialized");
+
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x000000);
+
+      camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.1, 1000);
+      camera.position.set(0, 1.5, 3);
+
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.body.appendChild(renderer.domElement);
+
+      // Lighting
+      const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+      scene.add(ambient);
+      const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
+      dirLight.position.set(2, 2, 2);
+      scene.add(dirLight);
+
+      loader = new THREE.GLTFLoader();
+
+      window.addEventListener("resize", onWindowResize, false);
+      animate();
+    }
+
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.render(scene, camera);
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      renderer.render(scene, camera);
+    }
+
+    /****************************
+     *  Base64 Model Loading
+     ****************************/
+    function loadModelFromBase64(gender, base64Data) {
+      console.log("🚀 loadModelFromBase64() called for", gender);
+
+      document.getElementById("loading").style.display = "block";
+      document.getElementById("loading").textContent = "Loading model...";
+
+      try {
+        const blob = b64toBlob(base64Data.split(",")[1], "model/gltf-binary");
+        const url = URL.createObjectURL(blob);
+
+        loader.load(
+          url,
+          (gltf) => {
+            console.log("✅ Model loaded from Base64");
+            if (model) scene.remove(model); // remove old one
+            model = gltf.scene;
+            centerAndScaleModel(model);
+            scene.add(model);
+            document.getElementById("loading").style.display = "none";
+            if (window.Android) window.Android.modelLoadingComplete(true);
+          },
+          undefined,
+          (err) => {
+            console.error("❌ Failed to load Base64 model:", err);
+            document.getElementById("loading").textContent = "Error loading model!";
+            if (window.Android) window.Android.modelLoadingComplete(false);
+          }
+        );
+      } catch (e) {
+        console.error("❌ Invalid Base64 model:", e);
+      }
+    }
+
+    function b64toBlob(b64Data, contentType) {
+      const byteChars = atob(b64Data);
+      const byteArrays = [];
+      for (let offset = 0; offset < byteChars.length; offset += 512) {
+        const slice = byteChars.slice(offset, offset + 512);
+        const byteNumbers = new Array(slice.length);
+        for (let i = 0; i < slice.length; i++) {
+          byteNumbers[i] = slice.charCodeAt(i);
+        }
+        byteArrays.push(new Uint8Array(byteNumbers));
+      }
+      return new Blob(byteArrays, { type: contentType });
+    }
+
+    /****************************
+     *  Blend Shape + Rotation Update
+     ****************************/
+    window.updateBlendShapes = function (blendShapeData, pitch, yaw, roll) {
+      console.log("🔁 updateBlendShapes called");
+
+      if (!model) {
+        console.warn("⚠️ updateBlendShapes(): Model not loaded yet.");
+        return;
+      }
+
+      try {
+        // Normalize the incoming blendShapeData: it might be already an Array/object
+        // (if native invoked updateBlendShapes([...],...)) or a JSON string
+        // (if native passed a quoted string). Handle both.
+        let data;
+        if (typeof blendShapeData === 'string') {
+          try {
+            data = JSON.parse(blendShapeData);
+          } catch (e) {
+            console.warn('⚠️ updateBlendShapes: could not JSON.parse string, falling back to empty array', e);
+            data = [];
+          }
+        } else {
+          data = blendShapeData;
+        }
+
+        // Apply head rotation
+        model.rotation.x = pitch * Math.PI / 180;
+        model.rotation.y = yaw * Math.PI / 180;
+        model.rotation.z = -roll * Math.PI / 180;
+
+        // Apply morph target weights
+        model.traverse((node) => {
+          if (node.isMesh && node.morphTargetDictionary && node.morphTargetInfluences) {
+            data.forEach((item) => {
+              const index = node.morphTargetDictionary[item.name];
+              if (index !== undefined) {
+                node.morphTargetInfluences[index] = item.score;
+              }
+            });
+          }
+        });
+
+        renderer.render(scene, camera);
+      } catch (e) {
+        console.error("❌ Error in updateBlendShapes:", e);
+      }
+    };
+
+    /****************************
+     *  Utility
+     ****************************/
+    function centerAndScaleModel(model) {
+      const bbox = new THREE.Box3().setFromObject(model);
+      const size = bbox.getSize(new THREE.Vector3());
+      const center = bbox.getCenter(new THREE.Vector3());
+      const maxDim = Math.max(size.x, size.y, size.z);
+      const scaleFactor = 1.5 / maxDim;
+
+      model.scale.setScalar(scaleFactor);
+      model.position.x = -center.x * scaleFactor;
+      model.position.y = -center.y * scaleFactor + 2.0; // shift upward
+      model.position.z = -center.z * scaleFactor;
+
+      // optional: slightly lift above the ground
+      const newBox = new THREE.Box3().setFromObject(model);
+      model.position.y -= newBox.min.y * 0.5;
+}
+
+</script>
+</body>
+</html>
