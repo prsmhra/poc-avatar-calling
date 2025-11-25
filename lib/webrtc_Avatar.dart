@@ -3,26 +3,50 @@ import 'dart:typed_data';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:webrtc/SignalingService.dart';
 
+class TranslationMessage {
+  final String text;
+  final String languageCode;
+  final int timestamp; // For sync
+
+  TranslationMessage({
+    required this.text,
+    required this.languageCode,
+    required this.timestamp,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'text': text,
+        'languageCode': languageCode,
+        'timestamp': timestamp,
+      };
+
+  factory TranslationMessage.fromJson(Map<String, dynamic> json) {
+    return TranslationMessage(
+      text: json['text'] as String,
+      languageCode: json['languageCode'] as String,
+      timestamp: json['timestamp'] as int,
+    );
+  }
+}
+
 class webrtc_Avatar {
   RTCPeerConnection? _peerConnection;
   MediaStream? _localStream;
 
-  //For Translator ******************
-  // ****** TEXT TRANSLATOR CHANNEL *******
+  // Text translation channel with metadata
   RTCDataChannel? textChannel;
-  Function(String)? onTextReceived;
-  //**********************************/
+  Function(TranslationMessage)? onTranslationReceived;
 
+  // Avatar frame channel
   RTCDataChannel? avatarDataChannel;
   Function(Uint8List)? onAvatarFrameReceived;
 
-  //For Web Socket
   SignalingService? signaling;
+
   void attachSignaling(SignalingService service) {
     signaling = service;
   }
 
-  // Initialize PeerConnection and data channel
   Future<void> init() async {
     await _initPeerConnection();
     await _initLocalMedia();
@@ -54,16 +78,20 @@ class webrtc_Avatar {
     };
 
     _peerConnection!.onDataChannel = (RTCDataChannel channel) {
-      avatarDataChannel = channel;
-      avatarDataChannel!.onMessage = (RTCDataChannelMessage message) {
-        final Uint8List bytes = base64Decode(message.text);
-        if (onAvatarFrameReceived != null) onAvatarFrameReceived!(bytes);
-      };
+      if (channel.label == 'avatarChannel') {
+        avatarDataChannel = channel;
+        avatarDataChannel!.onMessage = (RTCDataChannelMessage message) {
+          final Uint8List bytes = base64Decode(message.text);
+          if (onAvatarFrameReceived != null) onAvatarFrameReceived!(bytes);
+        };
+      } else if (channel.label == 'textChannel') {
+        textChannel = channel;
+        _setupTextChannelListener();
+      }
     };
   }
 
   Future<void> _initLocalMedia() async {
-    // Only audio or no media; video is false
     final constraints = {'audio': true, 'video': false};
     _localStream = await navigator.mediaDevices.getUserMedia(constraints);
 
@@ -73,6 +101,7 @@ class webrtc_Avatar {
   }
 
   void _createDataChannel() async {
+    // Avatar channel
     avatarDataChannel = await _peerConnection!.createDataChannel(
       'avatarChannel',
       RTCDataChannelInit()
@@ -85,27 +114,44 @@ class webrtc_Avatar {
       if (onAvatarFrameReceived != null) onAvatarFrameReceived!(bytes);
     };
 
-    // --- TEXT CHANNEL FOR TRANSLATION ---
+    // Text translation channel
     textChannel = await _peerConnection!.createDataChannel(
       'textChannel',
       RTCDataChannelInit()..ordered = true,
     );
 
+    _setupTextChannelListener();
+  }
+
+  void _setupTextChannelListener() {
     textChannel!.onMessage = (RTCDataChannelMessage message) {
-      if (onTextReceived != null) {
-        onTextReceived!(message.text);
+      try {
+        final json = jsonDecode(message.text) as Map<String, dynamic>;
+        final translationMsg = TranslationMessage.fromJson(json);
+        if (onTranslationReceived != null) {
+          onTranslationReceived!(translationMsg);
+        }
+      } catch (e) {
+        print('❌ Error parsing translation message: $e');
       }
     };
   }
 
-  void sendTextMessage(String text) {
-  if (textChannel != null &&
-      textChannel!.state == RTCDataChannelState.RTCDataChannelOpen) {
-    textChannel!.send(RTCDataChannelMessage(text));
-  } else {
-    print("⚠️ Text channel not open");
+  void sendTranslation(String text, String languageCode) {
+    if (textChannel != null &&
+        textChannel!.state == RTCDataChannelState.RTCDataChannelOpen) {
+      final message = TranslationMessage(
+        text: text,
+        languageCode: languageCode,
+        timestamp: DateTime.now().millisecondsSinceEpoch,
+      );
+      final json = jsonEncode(message.toJson());
+      textChannel!.send(RTCDataChannelMessage(json));
+      print('📤 Sent translation: $text [$languageCode]');
+    } else {
+      print('⚠️ Text channel not open');
+    }
   }
-}
 
   void sendAvatarFrame(Uint8List frameBytes) {
     if (avatarDataChannel != null &&
@@ -118,14 +164,12 @@ class webrtc_Avatar {
   Future<String> makeOffer() async {
     final offer = await _peerConnection!.createOffer();
     await _peerConnection!.setLocalDescription(offer);
-    // Send offer via WebSocket automatically
     signaling?.send({'type': 'offer', 'sdp': offer.sdp});
     return offer.sdp!;
   }
 
   Future<String> makeAnswer() async {
     try {
-      // Check if remote SDP is set
       if (_peerConnection?.setRemoteDescription == null) {
         return 'Cannot create answer: remote description not set yet!';
       }
@@ -135,13 +179,13 @@ class webrtc_Avatar {
       signaling?.send({'type': 'answer', 'sdp': answer.sdp});
       return answer.sdp!;
     } catch (e) {
-      return 'Error creating answer: $e'; // safely return null instead of crashing
+      return 'Error creating answer: $e';
     }
   }
 
   Future<void> setRemoteDescription(String sdp, String type) async {
     if (!isValidSdp(sdp)) {
-      print("Invalid SDP received!");
+      print('Invalid SDP received!');
       return;
     }
     await _peerConnection!.setRemoteDescription(
@@ -161,11 +205,12 @@ class webrtc_Avatar {
 
   bool isValidSdp(String sdp) {
     if (sdp.trim().isEmpty) return false;
-    return sdp.trim().startsWith("v=0");
+    return sdp.trim().startsWith('v=0');
   }
 
   Future<void> dispose() async {
     avatarDataChannel?.close();
+    textChannel?.close();
     await _localStream?.dispose();
     await _peerConnection?.close();
     _peerConnection = null;

@@ -39,10 +39,12 @@
       console.log("✅ Debug logger initialized");
 
       scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x000000);
+      // scene.background = new THREE.Color(0x000000);
+      scene.background = new THREE.Color("#6e6b65");
 
       camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.1, 1000);
-      camera.position.set(0, 1.5, 3);
+      // camera.position.set(0, 1.5, 3);
+      camera.position.set(0, 2, 0.5);
 
       renderer = new THREE.WebGLRenderer({ antialias: true });
       renderer.setSize(window.innerWidth, window.innerHeight);
@@ -191,7 +193,7 @@
       // optional: slightly lift above the ground
       const newBox = new THREE.Box3().setFromObject(model);
       model.position.y -= newBox.min.y * 0.5;
-}
+    }
 
 </script>
 </body>

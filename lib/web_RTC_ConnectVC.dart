@@ -30,7 +30,7 @@ class web_RTC_ConnectVCState extends State<web_RTC_ConnectVC> {
   void initState() {
     super.initState();
     // Default WebSocket URL (user can change in UI)
-     ipAddressTextField.text = "ws://192.168.1.32:8765";
+     ipAddressTextField.text = "";
 
     requestCameraPermission();
   }

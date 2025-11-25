@@ -11,6 +11,7 @@ import 'package:webrtc/Common_Files/SharedPreferencesService.dart';
 import 'package:webrtc/Common_Files/commonAppColor.dart';
 import 'package:webrtc/Core_Module/customButtonCreation.dart';
 import 'package:webrtc/LocalTranslator.dart';
+import 'package:webrtc/LanguageDetector.dart';
 import 'package:webrtc/SignalingService.dart';
 import 'package:webrtc/webrtc_Avatar.dart';
 
@@ -34,20 +35,26 @@ class web_rtc_avatar_screenState extends State<web_rtc_avatar_screen> {
   final webrtc_Avatar _webrtcService = webrtc_Avatar();
   Uint8List? remoteAvatarFrame;
 
-  //For Translator *******************
+  // Translation components
   final AudioSTTTTS audio = AudioSTTTTS();
   final LocalTranslator translator = LocalTranslator();
-  String receivedTranslatedText = "";
+  final LanguageDetector languageDetector = LanguageDetector();
+  
+  String receivedTranslatedText = '';
+  String detectedLanguage = 'Unknown';
+  
+  // Supported language pairs (you can add more)
+  TranslateLanguage primaryLang = TranslateLanguage.english;
+  TranslateLanguage secondaryLang = TranslateLanguage.hindi;
 
   GlobalKey _repaintKey = GlobalKey();
   Timer? _avatarTimer;
 
   bool _isConnected = false;
-  String locationNumStr = "male.glb";
-  //For Show the Drop Down
+  bool _isListening = false;
+  String locationNumStr = 'Doc_Male.glb';
+
   final List<String> locationNumberItem = [
-    'male.glb',
-    'female.glb',
     'Doc_Male.glb',
     'Doc_Female.glb',
     'Patient_Male.glb',
@@ -58,12 +65,8 @@ class web_rtc_avatar_screenState extends State<web_rtc_avatar_screen> {
   void initState() {
     super.initState();
 
-    //For translator **********************
     _initTranslator();
-
-    // Default WebSocket URL (user can change in UI)
     widget.signaling.onMessageReceived = _handleSignalingMessage;
-
     _webrtcService.attachSignaling(widget.signaling);
 
     initWebRTC();
@@ -74,12 +77,13 @@ class web_rtc_avatar_screenState extends State<web_rtc_avatar_screen> {
     });
   }
 
-  //For translator **********************
   Future<void> _initTranslator() async {
+    // Initialize bidirectional translation: English ↔ Hindi
     await translator.init(
-      from: TranslateLanguage.english,
-      to: TranslateLanguage.hindi,
+      languageA: primaryLang,
+      languageB: secondaryLang,
     );
+    print('✅ Translator initialized: ${primaryLang.bcpCode} ↔ ${secondaryLang.bcpCode}');
   }
 
   void _handleSignalingMessage(Map<String, dynamic> message) async {
@@ -104,7 +108,8 @@ class web_rtc_avatar_screenState extends State<web_rtc_avatar_screen> {
 
   void _startAvatarStream() {
     _avatarTimer?.cancel();
-    _avatarTimer = Timer.periodic(Duration(seconds: 1), (timer) async {
+    // 15 FPS for better lip-sync
+    _avatarTimer = Timer.periodic(Duration(milliseconds: 66), (timer) async {
       final bytes = await _captureContainer();
       if (bytes != null) {
         _webrtcService.sendAvatarFrame(bytes);
@@ -123,13 +128,15 @@ class web_rtc_avatar_screenState extends State<web_rtc_avatar_screen> {
       );
       return byteData?.buffer.asUint8List();
     } catch (e) {
-      print("Capture error: $e");
+      print('Capture error: $e');
       return null;
     }
   }
 
   Future<void> initWebRTC() async {
     await _webrtcService.init();
+
+    // Handle incoming avatar frames
     _webrtcService.onAvatarFrameReceived = (frame) {
       if (!mounted) return;
       setState(() {
@@ -137,78 +144,120 @@ class web_rtc_avatar_screenState extends State<web_rtc_avatar_screen> {
       });
     };
 
-    //For Translator ***********************
-    _webrtcService.onTextReceived = (text) async {
+    // Handle incoming translations
+    _webrtcService.onTranslationReceived = (translationMsg) async {
+      if (!mounted) return;
+
+      print('📥 Received: ${translationMsg.text} [${translationMsg.languageCode}]');
+
+      // Detect which language we received
+      String? detectedLang = await languageDetector.detectLanguage(translationMsg.text);
+      
+      String textToSpeak = translationMsg.text;
+      String speakLocale = translationMsg.languageCode;
+
+      // If it's in the other language, translate it back
+      if (detectedLang == secondaryLang.bcpCode.split('-').first) {
+        // Received secondary language, translate to primary
+        textToSpeak = await translator.translateBtoA(translationMsg.text);
+        speakLocale = primaryLang.bcpCode
+        print('🔄 Translated back: $textToSpeak');
+      } else if (detectedLang == primaryLang.bcpCode.split('-').first) {
+        // Received primary language, translate to secondary
+        textToSpeak = await translator.translateAtoB(translationMsg.text);
+        speakLocale = secondaryLang.bcpCode;
+        print('🔄 Translated: $textToSpeak');
+      }
+
       setState(() {
-        receivedTranslatedText = text;
+        receivedTranslatedText = textToSpeak;
+        detectedLanguage = detectedLang ?? 'Unknown';
       });
 
-      // Speak received text
-      audio.speak(text);
+      // Speak in appropriate language
+      await audio.speak(textToSpeak, languageCode: speakLocale);
     };
   }
 
-  // Future<void> _connectWebRTC() async {
-  //   try {
-  //     print("Connecting...");
-  //     widget.signaling.onMessageReceived = _handleSignalingMessage;
+  void startAutoTranslation() async {
+    if (_isListening) {
+      stopSpeaking();
+      return;
+    }
 
-  //     _webrtcService.attachSignaling(widget.signaling);
+    setState(() {
+      _isListening = true;
+    });
 
-  //     initWebRTC();
-  //     _startAvatarStream();
+    // Listen with default device locale first
+    // We'll detect language from the text afterwards
+    audio.startListening(
+      (spokenText) async {
+        if (spokenText.trim().isEmpty) return;
 
-  //     Future.delayed(Duration(seconds: 1), () async {
-  //       final sdp = await _webrtcService.makeOffer();
+        print('🎤 Heard: $spokenText');
 
-  //       setState(() {
-  //         _isConnected = true;
-  //       });
-  //     });
-  //   } catch (e) {
-  //     print("Connection failed: $e");
-  //   }
-  // }
+        // Detect language from spoken text
+        String? detectedLang = await languageDetector.detectLanguage(spokenText);
+        
+        if (detectedLang == null) {
+          print('⚠️ Could not detect language, defaulting to primary');
+          detectedLang = primaryLang.bcpCode.split('-').first;
+        }
 
-  // Future<void> _disconnectWebRTC() async {
-  //   print("Disconnecting...");
-  //   try {
-  //     _avatarTimer?.cancel(); // ✅ stop background timer
-  //     _webrtcService.onAvatarFrameReceived = null; // ✅ drop callbacks
-  //     widget.signaling.onMessageReceived = null; // ✅ detach signaling handler
-  //     _webrtcService.dispose();
+        setState(() {
+          detectedLanguage = detectedLang!;
+        });
 
-  //     setState(() {
-  //       _isConnected = false;
-  //       remoteAvatarFrame = null;
-  //     });
-  //   } catch (e) {
-  //     print("Disconnection error: $e");
-  //   }
-  // }
+        String translated;
+        String targetLocale;
 
-  void startSpeaking() {
-    audio.startListening((spokenText) async {
-      if (spokenText.trim().isEmpty) return;
+        // Translate based on detected language
+        if (detectedLang == primaryLang.bcpCode.split('-').first) {
+          // Speaking primary language → translate to secondary
+          translated = await translator.translateAtoB(spokenText);
+          targetLocale = secondaryLang.bcpCode;
+          print('🔄 English → Hindi: $translated');
+        } else if (detectedLang == secondaryLang.bcpCode.split('-').first) {
+          // Speaking secondary language → translate to primary
+          translated = await translator.translateBtoA(spokenText);
+          targetLocale = primaryLang.bcpCode;
+          print('🔄 Hindi → English: $translated');
+        } else {
+          // Unknown language, send as-is
+          translated = spokenText;
+          targetLocale = primaryLang.bcpCode;
+          print('⚠️ Unknown language, sending as-is');
+        }
 
-      // translate locally
-      final translated = await translator.translate(spokenText);
+        // Send translated text
+        _webrtcService.sendTranslation(translated, targetLocale);
 
-      // send through WebRTC P2P
-      _webrtcService.sendTextMessage(translated);
+        // Show what we sent
+        setState(() {
+          receivedTranslatedText = 'Sent ($detectedLang): $translated';
+        });
+      },
+    );
+  }
 
-      // also speak locally for testing
-      audio.speak("You said: $translated");
+  void stopSpeaking() {
+    audio.stopListening();
+    setState(() {
+      _isListening = false;
     });
   }
 
   @override
   void dispose() {
-    _avatarTimer?.cancel(); // ✅ stop background timer
-    _webrtcService.onAvatarFrameReceived = null; // ✅ drop callbacks
-    widget.signaling.onMessageReceived = null; // ✅ detach signaling handler
+    _avatarTimer?.cancel();
+    _webrtcService.onAvatarFrameReceived = null;
+    _webrtcService.onTranslationReceived = null;
+    widget.signaling.onMessageReceived = null;
+    audio.dispose();
+    translator.dispose();
+    languageDetector.dispose();
     _webrtcService.dispose();
-
     super.dispose();
   }
 
@@ -222,10 +271,6 @@ class web_rtc_avatar_screenState extends State<web_rtc_avatar_screen> {
             width: MediaQuery.of(context).size.width,
             height: MediaQuery.of(context).size.height,
             color: Colors.white,
-            // child: Image.asset(
-            //   'assets/bg.png', // Path to your image
-            //   fit: BoxFit.cover, // Fills the available space
-            // ),
           ),
           Container(
             width: MediaQuery.of(context).size.width,
@@ -236,40 +281,74 @@ class web_rtc_avatar_screenState extends State<web_rtc_avatar_screen> {
                 mainAxisAlignment: MainAxisAlignment.start,
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
+                  // Local avatar
                   RepaintBoundary(
                     key: _repaintKey,
                     child: Container(
                       width: MediaQuery.of(context).size.width,
                       height: MediaQuery.of(context).size.height / 2 - 110,
-                      color: Colors.grey, //_currentColor,
+                      color: Colors.grey,
                       child: const Center(
                         child: AndroidView(viewType: 'camera_native_view'),
                       ),
                     ),
                   ),
                   SizedBox(height: 10),
+
                   // Remote avatar
                   SizedBox(
                     width: MediaQuery.of(context).size.width,
                     height: MediaQuery.of(context).size.height / 2 - 110,
                     child: remoteAvatarFrame != null
-                        ? SizedBox(
-                            width: MediaQuery.of(context).size.width,
-                            height:
-                                MediaQuery.of(context).size.height / 2 - 110,
-                            child: Image.memory(
-                              remoteAvatarFrame!,
-                              gaplessPlayback: true,
-                              fit: BoxFit.cover,
-                            ),
+                        ? Image.memory(
+                            remoteAvatarFrame!,
+                            gaplessPlayback: true,
+                            fit: BoxFit.cover,
                           )
                         : Container(
                             width: MediaQuery.of(context).size.width,
-                            height:
-                                MediaQuery.of(context).size.height / 2 - 110,
+                            height: MediaQuery.of(context).size.height / 2 - 110,
                             color: Colors.grey,
+                            child: Center(
+                              child: Text(
+                                'Waiting for remote avatar...',
+                                style: TextStyle(color: Colors.white),
+                              ),
+                            ),
                           ),
                   ),
+
+                  // Language detection status
+                  if (detectedLanguage != 'Unknown')
+                    Container(
+                      margin: EdgeInsets.symmetric(horizontal: 20, vertical: 5),
+                      padding: EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.green.shade100,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        '🌐 Detected: $detectedLanguage',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+
+                  // Translation status
+                  if (receivedTranslatedText.isNotEmpty)
+                    Container(
+                      margin: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                      padding: EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        receivedTranslatedText,
+                        style: TextStyle(fontSize: 14),
+                      ),
+                    ),
+
+                  // Call button
                   Container(
                     margin: EdgeInsets.only(top: 20, left: 20, right: 20),
                     child: customButtonCreation(
@@ -286,23 +365,43 @@ class web_rtc_avatar_screenState extends State<web_rtc_avatar_screen> {
                           : commonAppColor.buttonColor,
                       textColor: Colors.black,
                       onPressed: () async {
-                        // if (_isConnected) {
-                        //   await _disconnectWebRTC();
-                        // } else {
-                        //   await _connectWebRTC();
-                        // }
-                        //Add your button onPressed logic here
-                        final sdp = await _webrtcService.makeOffer();
-                        print("String Show = $sdp");
-                        // 2️⃣ Start voice translation
-                        startSpeaking();
+                        if (_isConnected) {
+                          stopSpeaking();
+                          // Handle disconnect
+                        } else {
+                          final sdp = await _webrtcService.makeOffer();
+                          print('📤 Offer SDP: $sdp');
+                          setState(() {
+                            _isConnected = true;
+                          });
+                        }
                       },
+                    ),
+                  ),
+
+                  // Auto translation button (detects language automatically)
+                  Container(
+                    margin: EdgeInsets.only(top: 10, left: 20, right: 20),
+                    child: customButtonCreation(
+                      buttonFontSize: 18,
+                      fontName: font_roboto,
+                      fontWeight: FontWeight.w400,
+                      buttonHeight: 60,
+                      title: _isListening
+                          ? '🔴 Stop Auto-Translation'
+                          : '🎤 Start Auto-Translation',
+                      backgroundColor: _isListening ? Colors.red : Colors.green,
+                      borderColor: _isListening ? Colors.red : Colors.green,
+                      textColor: Colors.white,
+                      onPressed: startAutoTranslation,
                     ),
                   ),
                 ],
               ),
             ),
           ),
+
+          // Header with back button and avatar selector
           Container(
             height: 80,
             margin: EdgeInsets.only(top: 40, left: 20, right: 20),
@@ -323,12 +422,10 @@ class web_rtc_avatar_screenState extends State<web_rtc_avatar_screen> {
                   decoration: BoxDecoration(
                     color: commonAppColor.buttonColor,
                     border: Border.all(
-                      color: commonAppColor.buttonColor, // 👈 border color
-                      width: 2.0, // 👈 border width
+                      color: commonAppColor.buttonColor,
+                      width: 2.0,
                     ),
-                    borderRadius: BorderRadius.circular(
-                      10,
-                    ), // optional rounded corners
+                    borderRadius: BorderRadius.circular(10),
                   ),
                   child: Stack(
                     children: [
@@ -348,7 +445,6 @@ class web_rtc_avatar_screenState extends State<web_rtc_avatar_screen> {
                               ),
                             ),
                           ),
-
                           Container(
                             color: commonAppColor.yellowColor,
                             alignment: Alignment.center,
@@ -386,54 +482,6 @@ class web_rtc_avatar_screenState extends State<web_rtc_avatar_screen> {
     final response = await Constant.platform.invokeMethod('sendFileName', {
       'file_name': fileName,
     });
-    print(response); // prints "Android received: Hello Android!"
-  }
-
-  Future<String?> _showInputDialog() async {
-    final TextEditingController controller = TextEditingController();
-
-    return showDialog<String>(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text("Please enter valid SDP."),
-          content: TextField(
-            controller: controller,
-            decoration: const InputDecoration(hintText: "Type something..."),
-          ),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context, controller.text);
-              },
-              child: const Text("OK"),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context); // return null
-              },
-              child: const Text("Cancel"),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  /// Show SDP for copy-paste
-  void _showSDPPopup(String title, String sdp) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text(title),
-        content: SingleChildScrollView(child: Text(sdp)),
-        actions: [
-          TextButton(
-            child: const Text("Close"),
-            onPressed: () => Navigator.pop(context),
-          ),
-        ],
-      ),
-    );
+    print(response);
   }
 }
